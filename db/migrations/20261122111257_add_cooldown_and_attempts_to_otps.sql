@@ -1,0 +1,9 @@
+-- migrate:up
+ALTER TABLE otps
+ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN last_sent_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- migrate:down
+ALTER TABLE otps
+DROP COLUMN IF EXISTS attempts,
+DROP COLUMN IF EXISTS last_sent_at;

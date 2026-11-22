@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -20,10 +21,12 @@ public class AuthService {
 
     private static final String REQUIRED_DOMAIN = "@mvjce.edu.in";
     private static final Pattern USN_PATTERN = Pattern.compile("^1MJ\\d{2}[A-Z]{2}(?!000)\\d{3}$");
+    private static final int COOLDOWN_SECONDS = 60;
 
     private final UserRepository userRepository;
     private final StudentRepository studentRepository;
     private final OtpRepository otpRepository;
+    private final OtpService otpService;
     private final PasswordEncoder passwordEncoder;
     private final JavaMailSender mailSender;
     private final JwtUtil jwtUtil;
@@ -31,12 +34,14 @@ public class AuthService {
     public AuthService(UserRepository userRepository,
             StudentRepository studentRepository,
             OtpRepository otpRepository,
+            OtpService otpService,
             PasswordEncoder passwordEncoder,
             JavaMailSender mailSender,
             JwtUtil jwtUtil) {
         this.userRepository = userRepository;
         this.studentRepository = studentRepository;
         this.otpRepository = otpRepository;
+        this.otpService = otpService;
         this.passwordEncoder = passwordEncoder;
         this.mailSender = mailSender;
         this.jwtUtil = jwtUtil;
@@ -59,14 +64,51 @@ public class AuthService {
             throw new IllegalArgumentException("Email is already registered");
         }
 
+        return generateAndSendOtp(email, "CampusGo Verification Code");
+    }
+
+    @Transactional
+    public ApiResponse sendForgotPasswordOtp(SendOtpRequest req) {
+        String email = req.getEmail().trim().toLowerCase();
+
+        if (!email.endsWith(REQUIRED_DOMAIN)) {
+            throw new IllegalArgumentException("Must use college email ending with " + REQUIRED_DOMAIN);
+        }
+
+        String usn = email.substring(0, email.indexOf("@")).toUpperCase();
+        if (!USN_PATTERN.matcher(usn).matches()) {
+            throw new IllegalArgumentException("Invalid USN format in email prefix: " + usn);
+        }
+
+        if (!userRepository.existsByEmail(email)) {
+            throw new IllegalArgumentException("No account found with this email");
+        }
+
+        return generateAndSendOtp(email, "CampusGo Password Reset Code");
+    }
+
+    private ApiResponse generateAndSendOtp(String email, String subject) {
+        Optional<Otp> existingOtp = otpRepository.findByEmail(email);
+
+        if (existingOtp.isPresent()) {
+            Otp otpObj = existingOtp.get();
+            long secondsPassed = Duration.between(otpObj.getLastSentAt(), OffsetDateTime.now()).getSeconds();
+            if (secondsPassed < COOLDOWN_SECONDS) {
+                long waitTime = COOLDOWN_SECONDS - secondsPassed;
+                throw new IllegalArgumentException(
+                        "Please wait " + waitTime + " seconds before requesting another OTP.");
+            }
+        }
+
         String otpCode = String.format("%06d", new SecureRandom().nextInt(1000000));
         OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(5);
 
-        Optional<Otp> existingOtp = otpRepository.findByEmail(email);
         if (existingOtp.isPresent()) {
             Otp otpObj = existingOtp.get();
             otpObj.setOtpCode(otpCode);
             otpObj.setExpiresAt(expiresAt);
+            otpObj.setAttempts(0);
+            otpObj.setLastSentAt(OffsetDateTime.now());
             otpRepository.save(otpObj);
         } else {
             otpRepository.save(new Otp(email, otpCode, expiresAt));
@@ -74,20 +116,16 @@ public class AuthService {
 
         SimpleMailMessage message = new SimpleMailMessage();
         message.setTo(email);
-        message.setSubject("CampusGo Verification Code");
-        message.setText("Your OTP verification code for CampusGo registration is: " + otpCode
-                + "\n\nThis code expires in 5 minutes.");
+        message.setSubject(subject);
+        message.setText("Your OTP verification code is: " + otpCode + "\n\nThis code expires in 5 minutes.");
 
         try {
-            System.out.println("========== DEV OTP FOR " + email + " IS: " + otpCode + " ==========");
             mailSender.send(message);
         } catch (Exception e) {
-            // Log full error in backend terminal for developer
             org.slf4j.LoggerFactory.getLogger(AuthService.class).error("SMTP Error: ", e);
-
-            // Clean generic exception for API client
             throw new RuntimeException("Failed to send verification email. Please try again later.");
         }
+
         return new ApiResponse(true, "OTP sent successfully to " + email);
     }
 
@@ -103,13 +141,7 @@ public class AuthService {
         Otp otpRecord = otpRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("No OTP requested for this email"));
 
-        if (!otpRecord.getOtpCode().equals(req.getOtp())) {
-            throw new IllegalArgumentException("Invalid OTP code");
-        }
-
-        if (OffsetDateTime.now().isAfter(otpRecord.getExpiresAt())) {
-            throw new IllegalArgumentException("OTP code has expired. Please request a new one.");
-        }
+        validateOtpCode(otpRecord, req.getOtp());
 
         if (userRepository.existsByEmail(email)) {
             throw new IllegalArgumentException("Email is already registered");
@@ -131,6 +163,46 @@ public class AuthService {
         otpRepository.deleteByEmail(email);
 
         return new ApiResponse(true, "Student registered successfully with USN: " + usn);
+    }
+
+    @Transactional
+    public ApiResponse resetPassword(ResetPasswordRequest req) {
+        String email = req.getEmail().trim().toLowerCase();
+
+        if (!email.endsWith(REQUIRED_DOMAIN)) {
+            throw new IllegalArgumentException("Must use college email ending with " + REQUIRED_DOMAIN);
+        }
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("No account found with this email"));
+
+        Otp otpRecord = otpRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("No OTP requested for this email"));
+
+        validateOtpCode(otpRecord, req.getOtp());
+
+        user.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
+        userRepository.save(user);
+
+        otpRepository.deleteByEmail(email);
+
+        return new ApiResponse(true, "Password reset successfully. You can now log in with your new password.");
+    }
+
+    private void validateOtpCode(Otp otpRecord, String submittedOtp) {
+        if (OffsetDateTime.now().isAfter(otpRecord.getExpiresAt())) {
+            throw new IllegalArgumentException("OTP code has expired. Please request a new one.");
+        }
+
+        if (!otpRecord.getOtpCode().equals(submittedOtp)) {
+            int remaining = otpService.recordFailedAttemptAndGetRemaining(otpRecord.getEmail());
+            if (remaining <= 0) {
+                throw new IllegalArgumentException(
+                        "Too many failed attempts. OTP has been invalidated. Please request a new one.");
+            } else {
+                throw new IllegalArgumentException("Invalid OTP code. " + remaining + " attempt(s) remaining.");
+            }
+        }
     }
 
     public LoginResponse login(LoginRequest req) {

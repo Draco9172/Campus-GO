@@ -139,7 +139,9 @@ CREATE TABLE public.otps (
     email text NOT NULL,
     otp_code character varying(6) NOT NULL,
     expires_at timestamp with time zone NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_sent_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -482,4 +484,5 @@ ALTER TABLE ONLY public.vendors
 
 INSERT INTO public.schema_migrations (version) VALUES
     ('20261101213632'),
-    ('20261121132000');
+    ('20261121132000'),
+    ('20261122111257');

@@ -29,6 +29,18 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @PostMapping("/forgot-password/send-otp")
+    public ResponseEntity<ApiResponse> sendForgotPasswordOtp(@Valid @RequestBody SendOtpRequest req) {
+        ApiResponse response = authService.sendForgotPasswordOtp(req);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/forgot-password/reset")
+    public ResponseEntity<ApiResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
+        ApiResponse response = authService.resetPassword(req);
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
         LoginResponse response = authService.login(req);
