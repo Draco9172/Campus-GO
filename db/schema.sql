@@ -131,6 +131,38 @@ ALTER SEQUENCE public.orders_id_seq OWNED BY public.orders.id;
 
 
 --
+-- Name: otps; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.otps (
+    id bigint NOT NULL,
+    email text NOT NULL,
+    otp_code character varying(6) NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: otps_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.otps_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: otps_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.otps_id_seq OWNED BY public.otps.id;
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -236,6 +268,13 @@ ALTER TABLE ONLY public.orders ALTER COLUMN id SET DEFAULT nextval('public.order
 
 
 --
+-- Name: otps id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.otps ALTER COLUMN id SET DEFAULT nextval('public.otps_id_seq'::regclass);
+
+
+--
 -- Name: users id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -271,6 +310,22 @@ ALTER TABLE ONLY public.order_items
 
 ALTER TABLE ONLY public.orders
     ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: otps otps_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.otps
+    ADD CONSTRAINT otps_email_key UNIQUE (email);
+
+
+--
+-- Name: otps otps_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.otps
+    ADD CONSTRAINT otps_pkey PRIMARY KEY (id);
 
 
 --
@@ -426,4 +481,5 @@ ALTER TABLE ONLY public.vendors
 --
 
 INSERT INTO public.schema_migrations (version) VALUES
-    ('20261101213632');
+    ('20261101213632'),
+    ('20261121132000');
